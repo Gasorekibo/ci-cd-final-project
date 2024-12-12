@@ -1,0 +1,65 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: counter-microservice-pipeline
+spec:
+  params:
+    - name: git-url
+      type: string
+      description: Git repository URL
+    - name: git-revision
+      type: string
+      description: Git revision to checkout
+      default: main
+  
+  tasks:
+    - name: clone-repository
+      taskRef:
+        name: git-clone
+      params:
+        - name: url
+          value: $(params.git-url)
+        - name: revision
+          value: $(params.git-revision)
+      workspaces:
+        - name: output
+          workspace: shared-workspace
+    
+    - name: lint
+      runAfter: [clone-repository]
+      taskRef:
+        name: flake8-lint
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+    
+    - name: unit-tests
+      runAfter: [lint]
+      taskRef:
+        name: python-tests
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+    
+    - name: build-image
+      runAfter: [unit-tests]
+      taskRef:
+        name: buildah
+      params:
+        - name: IMAGE
+          value: image-registry.openshift-image-registry.svc:5000/counter-microservice/counter-service:latest
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+    
+    - name: deploy
+      runAfter: [build-image]
+      taskRef:
+        name: openshift-client
+      params:
+        - name: COMMAND
+          value: |
+            oc rollout restart deployment/counter-microservice
+  
+  workspaces:
+    - name: shared-workspace
